@@ -1,6 +1,6 @@
-# mybnb
+# hotelReservation
 
-Airbnb 와 같은 공유 숙소 서비스 따라하기 입니다.
+XX트 호텔 예약 서비스 따라하기
 
 
 # Table of contents
