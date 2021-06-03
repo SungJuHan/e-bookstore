@@ -1,13 +1,12 @@
 <img src="https://user-images.githubusercontent.com/43338817/120570337-d97ad400-c452-11eb-890e-75badb9ee9c9.png" alt="" data-canonical-src="https://user-images.githubusercontent.com/43338817/120570337-d97ad400-c452-11eb-890e-75badb9ee9c9.png" width="250" height="250" /> <img src="https://user-images.githubusercontent.com/43338817/120570362-e992b380-c452-11eb-991d-7484e593d340.png" alt="" data-canonical-src="https://user-images.githubusercontent.com/43338817/120570362-e992b380-c452-11eb-991d-7484e593d340.png" width="250" height="250" />
 
-# e-bookstore
+# e-bookstore : 온라인서점
 
-XX트 호텔 예약 서비스 따라하기
-
+- 체크포인트 : https://workflowy.com/s/assessment-check-po/T5YrzcMewfo4J6LW
 
 # Table of contents
 
-- [mybnb](#---)
+- [ebookstore](#---)
   - [서비스 시나리오](#서비스-시나리오)
   - [분석/설계](#분석설계)
   - [구현](#구현)
@@ -27,56 +26,44 @@ XX트 호텔 예약 서비스 따라하기
 
 # 서비스 시나리오
 
-공유 숙소 서비스 따라하기
+온라인 서점 서비스 따라하기
 
 
 ## 기능적 요구사항
 
-1. 호스트가 속소를 신규 등록한다.
-1. 호스트가 숙소를 삭제한다.
-1. 게스트가 숙소를 검색한다.
-1. 게스트가 숙소를 선택하여 사용 예약한다.
-1. 게스트가 결제한다. (Sync, 결제서비스)
-1. 결제가 완료되면, 결제 & 예약 내용을 게스트에게 전달한다. (Async, 알림서비스)
-1. 예약 내역을 호스트에게 전달한다.
-1. 게스트는 본인의 예약 내용 및 상태를 조회한다.
-1. 게스트는 본인의 예약을 취소할 수 있다.
-1. 예약이 취소되면, 결제를 취소한다. (Async, 결제서비스)
-1. 결제가 취소되면, 결제 취소 내용을 게스트에게 전달한다. (Async, 알림서비스)
+1. 고객이 책을 주문한다.
+1. 고객이 결제한다. (Sync, 결제서비스)
+1. 결제가 완료되면, 주문이 접수되며 (Sync, 상품관리서비스) 주문 접수 시 배송이 시작된다. (Sync, 배송서비스)
+1. 결제, 주문, 배송이 완료되면 각 결제 & 주문 & 배송 내용을 고객에게 알림 전송한다. (Async, 알림서비스)
+1. 고객은 본인의 주문 내역 및 상태를 조회한다.
+1. 고객은 본인의 주문을 취소할 수 있다.
+1. 고객이 주문을 취소하면, 결제 & 주문 & 배송을 취소한다. (Sync, 결제/상품관리/배송서비스)
+1. 결제, 주문, 배송이 취소되면 각 내용을 고객에게 전달한다. (Async, 알림서비스)
 
 ## 비기능적 요구사항
 1. 트랜잭션
-    1. 결제가 되지 않은 예약건은 아예 거래가 성립되지 않아야 한다 - Sync 호출 
+    1. 결제가 되지 않은 주문건은 아예 거래가 성립되지 않아야 한다 - Sync 호출 
 1. 장애격리
-    1. 통지(알림) 기능이 수행되지 않더라도 예약은 365일 24시간 받을 수 있어야 한다 - Async (event-driven), Eventual Consistency
+    1. 통지(알림) 기능이 수행되지 않더라도 주문은 365일 24시간 받을 수 있어야 한다 - Async (event-driven), Eventual Consistency
     1. 결제시스템이 과중되면 사용자를 잠시동안 받지 않고 결제를 잠시후에 하도록 유도한다 - Circuit breaker, fallback
 1. 성능
-    1. 게스트와 호스트가 자주 예약관리에서 확인할 수 있는 상태를 마이페이지(프론트엔드)에서 확인할 수 있어야 한다 - CQRS
+    1. 고객이 자주 주문내역관리에서 확인할 수 있는 상태를 마이페이지(프론트엔드)에서 확인할 수 있어야 한다 - CQRS
     1. 처리상태가 바뀔때마다 email, app push 등으로 알림을 줄 수 있어야 한다 - Event driven
 
 
 # 분석/설계
 
-## AS-IS 조직 (Horizontally-Aligned)
-  ![image](https://user-images.githubusercontent.com/61722732/89151241-7b176780-d59b-11ea-84ae-ac62095c447e.JPG)
-
-## TO-BE 조직 (Vertically-Aligned)
-  ![image](https://user-images.githubusercontent.com/61722732/89151259-87032980-d59b-11ea-89a9-4f36f6807ab3.JPG)
-
 ## Event Storming 결과
-* MSAEz 로 모델링한 이벤트스토밍 결과 : http://msaez.io/#/storming/TWDBQXDzOJbymFE78o3DdlQ90XG3/mine/df3c8b244d858a53e494f65d203d8dfb/-MDnuFE6EJcSWUkOqn_K
+* MSAEz 로 모델링한 이벤트스토밍 결과 : http://www.msaez.io/#/storming/tUri1wqpAMbJUn0GwQNaQY4l6q03/local/13ea499c09dbecbbf095cabf65a3b574
 
 ### 이벤트 도출
-  ![image](https://user-images.githubusercontent.com/61722732/89151292-9f734400-d59b-11ea-9de6-d58aa8226d47.JPG)
-
-### 부적격 이벤트 탈락
-  ![image](https://user-images.githubusercontent.com/61722732/89151319-b023ba00-d59b-11ea-89d9-cc9208ca5409.JPG)
-
-* 과정중 도출된 잘못된 도메인 이벤트들을 걸러내는 작업을 수행함
-  - 숙소검색됨, 예약정보조회됨 :  UI 의 이벤트이지, 업무적인 의미의 이벤트가 아니라서 제외
+  ![image](https://user-images.githubusercontent.com/43338817/120571855-f2d14f80-c455-11eb-96b0-2699b47255f2.png)
+  
+* 기능적 요구사항 수행을 위한 이벤트 도출 및 잘못된 도메인 이벤트에 대한 삭제 작업 진행
   
 ### 액터, 커맨드 부착하여 읽기 좋게
-  ![image](https://user-images.githubusercontent.com/61722732/89151365-c3cf2080-d59b-11ea-94b4-3c6c25206bf7.JPG)
+  ![image](https://user-images.githubusercontent.com/43338817/120573757-13e76f80-c459-11eb-9500-2eaa54327ec5.png)
+
 
 ### 어그리게잇으로 묶기
   ![image](https://user-images.githubusercontent.com/61722732/89151387-d21d3c80-d59b-11ea-9a34-4e2e9afe87b5.JPG)
@@ -84,7 +71,7 @@ XX트 호텔 예약 서비스 따라하기
   * 숙소의 숙소관리, 예약의 예약관리, 결제의 결제이력, 알림의 알림이력, 마이페이지는 그와 연결된 command 와 event 들에 의하여 트랜잭션이 유지되어야 하는 단위로 그들 끼리 묶어줌
 
 ### 바운디드 컨텍스트로 묶기
-  ![image](https://user-images.githubusercontent.com/61722732/89151420-e6613980-d59b-11ea-865e-797db2722165.JPG)
+  ![image](https://user-images.githubusercontent.com/43338817/120574012-78a2ca00-c459-11eb-9953-88033fea3e6d.png)
 
 * 도메인 서열 분리 
   - Core Domain:   숙소, 예약 : 없어서는 안될 핵심 서비스이며, 연견 Up-time SLA 수준을 99.999% 목표, 배포주기는 app 의 경우 1주일 1회 미만, store 의 경우 1개월 1회 미만
