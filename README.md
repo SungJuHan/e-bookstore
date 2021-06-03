@@ -33,11 +33,12 @@
 
 1. 고객이 책을 주문한다.
 1. 고객이 결제한다. (Sync, 결제서비스)
-1. 결제가 완료되면, 주문이 접수되며 (Sync, 상품관리서비스) 주문 접수 시 배송이 시작된다. (Sync, 배송서비스)
+1. 결제가 완료되면, 주문이 접수되며 (Async, 상품관리서비스) 주문 접수 시 배송이 시작된다. (Async, 배송서비스)
 1. 결제, 주문, 배송이 완료되면 각 결제 & 주문 & 배송 내용을 고객에게 알림 전송한다. (Async, 알림서비스)
 1. 고객은 본인의 주문 내역 및 상태를 조회한다.
 1. 고객은 본인의 주문을 취소할 수 있다.
-1. 고객이 주문을 취소하면, 결제 & 주문 & 배송을 취소한다. (Sync, 결제/상품관리/배송서비스)
+1. 고객이 주문을 취소하면 결제가 취소된다. (Sync, 결제서비스)
+1. 결제가 취소되면, 주문이 취소되며 (Async, 상품관리서비스) 주문 취소 시 배송이 취소된다. (Async, 배송서비스)
 1. 결제, 주문, 배송이 취소되면 각 내용을 고객에게 전달한다. (Async, 알림서비스)
 
 ## 비기능적 요구사항
@@ -66,55 +67,57 @@
 
 
 ### 어그리게잇으로 묶기
-  ![image](https://user-images.githubusercontent.com/61722732/89151387-d21d3c80-d59b-11ea-9a34-4e2e9afe87b5.JPG)
+  ![image](https://user-images.githubusercontent.com/43338817/120574081-98d28900-c459-11eb-8963-c63d9510b38e.png)
 
-  * 숙소의 숙소관리, 예약의 예약관리, 결제의 결제이력, 알림의 알림이력, 마이페이지는 그와 연결된 command 와 event 들에 의하여 트랜잭션이 유지되어야 하는 단위로 그들 끼리 묶어줌
+  * 고객주문의 주문관리, 결제의 결제관리, 주문에 대한 상품관리, 배송의 배송관리, 알림의 알림이력은 그와 연결된 command와  event들에 의해 트랜잭션이 유지되어야 하는 단위로 묶어줌.
 
 ### 바운디드 컨텍스트로 묶기
   ![image](https://user-images.githubusercontent.com/43338817/120574012-78a2ca00-c459-11eb-9953-88033fea3e6d.png)
 
 * 도메인 서열 분리 
-  - Core Domain:   숙소, 예약 : 없어서는 안될 핵심 서비스이며, 연견 Up-time SLA 수준을 99.999% 목표, 배포주기는 app 의 경우 1주일 1회 미만, store 의 경우 1개월 1회 미만
+  - Core Domain:   주문, 상품관리, 배송 : 없어서는 안될 핵심 서비스이며, 연결 Up-time SLA 수준을 99.999% 목표, 배포주기의 경우 1주일 1회 미만
   - Supporting Domain:   알림, 마이페이지 : 경쟁력을 내기위한 서비스이며, SLA 수준은 연간 60% 이상 uptime 목표, 배포주기는 각 팀의 자율이나 표준 스프린트 주기가 1주일 이므로 1주일 1회 이상을 기준으로 함.
   - General Domain:   결제 : 결제서비스로 3rd Party 외부 서비스를 사용하는 것이 경쟁력이 높음 (핑크색으로 이후 전환할 예정)
 
 ### 폴리시 부착 (괄호는 수행주체, 폴리시 부착을 둘째단계에서 해놔도 상관 없음. 전체 연계가 초기에 드러남)
-  ![image](https://user-images.githubusercontent.com/61722732/89151438-f547ec00-d59b-11ea-9b0a-7e54da94a0f0.JPG)
+  ![image](https://user-images.githubusercontent.com/43338817/120576219-63c83580-c45d-11eb-8dee-6ac650424936.png)
 
 ### 폴리시의 이동과 컨텍스트 매핑 (점선은 Pub/Sub, 실선은 Req/Resp)
-  ![image](https://user-images.githubusercontent.com/61722732/89151466-02fd7180-d59c-11ea-8f08-d43a424b893f.JPG)
+  ![image](https://user-images.githubusercontent.com/43338817/120577175-e8678380-c45e-11eb-81e4-efd2f3f888c7.png)
+  
+### 완성된 1차 모형
+  ![image](https://user-images.githubusercontent.com/43338817/120578819-6462cb00-c461-11eb-8ef8-29a566c9feeb.png)
 
 ### 기능적 요구사항 검증
-  ![슬라이드13](https://user-images.githubusercontent.com/61722732/89151515-1f011300-d59c-11ea-9029-565bfd0dd26e.JPG)
-  ![슬라이드14](https://user-images.githubusercontent.com/61722732/89151518-21fc0380-d59c-11ea-9f22-727056c291dc.JPG)
-  ![슬라이드15](https://user-images.githubusercontent.com/61722732/89151524-245e5d80-d59c-11ea-87d3-842e297ff490.JPG)
-  ![슬라이드16](https://user-images.githubusercontent.com/61722732/89151531-26282100-d59c-11ea-8fdb-4f2abc1be094.JPG)
+  ![image](https://user-images.githubusercontent.com/43338817/120578142-4fd20300-c460-11eb-84e4-b8847c6cecd0.png)
+  
+  * 고객이 책을 주문한다. (OK)
+  * 고객이 결제한다. (Sync, 결제서비스) (OK)
+  * 결제가 완료되면, 주문이 접수되며 (Async, 상품관리서비스) 주문 접수 시 배송이 시작된다. (Async, 배송서비스) (OK)
+  
+  ![image](https://user-images.githubusercontent.com/43338817/120578582-06ce7e80-c461-11eb-974c-cb830b699f98.png)
+  
+  * 고객은 본인의 주문을 취소할 수 있다. (OK)
+  * 고객이 주문을 취소하면 결제가 취소된다. (OK)
+  * 결제가 취소되면, 주문이 취소되며 (Async, 상품관리서비스) 주문 취소 시 배송이 취소된다. (Async, 배송서비스) (OK)
 
-  * 호스트가 속소를 등록한다. (ok)
-  * 호스트가 숙소를 삭제한다. (ok)
-  * 게스트가 숙소를 선택하여 사용 예약한다. (ok)
-  * 게스트가 결제한다. (ok)
-  * 결제가 완료되면, 결제 & 예약 내용을 게스트에게 전달한다. (ok)
-  * 예약 내역을 호스트에게 전달한다. (ok)
-  * 게스트는 본인의 예약 내용 및 상태를 조회한다. (ok)
-  * 게스트는 본인의 예약을 취소할 수 있다. (ok)
-  * 예약이 취소되면, 결제를 취소한다. (ok)
-  * 결제가 취소되면, 결제 취소 내용을 게스트에게 전달한다. (ok)
+  ![image](https://user-images.githubusercontent.com/43338817/120578350-9e7f9d00-c460-11eb-950e-8c57e2566b51.png)  
+  
+  * 결제, 주문, 배송이 완료되면 각 결제 & 주문 & 배송 내용을 고객에게 알림 전송한다. (Async, 알림서비스) (OK)
+  * 결제, 주문, 배송이 취소되면 각 내용을 고객에게 전달한다. (Async, 알림서비스) (OK)
+
+### 모델 수정
+  ![image](https://user-images.githubusercontent.com/43338817/120578710-37aeb380-c461-11eb-9698-01bcd4bc6037.png)
+  
+  * 고객은 본인의 주문 내역 및 상태를 조회한다. (View를 추가혀여 요구사항 커버)
 
 ### 비기능 요구사항 검증
-  ![슬라이드17](https://user-images.githubusercontent.com/61722732/89151536-29231180-d59c-11ea-9294-b8f457143d57.JPG)
+  ![image](https://user-images.githubusercontent.com/43338817/120579448-7bee8380-c462-11eb-80ad-d353e2648d07.png)
 
 * 마이크로 서비스를 넘나드는 시나리오에 대한 트랜잭션 처리
-    - 숙소 예약시 결제처리:  결제가 완료되지 않은 예약은 절대 받지 않는다에 따라, ACID 트랜잭션 적용. 예약 완료시 결제처리에 대해서는 Request-Response 방식 처리
-    - 예약 완료시 알림 처리:  예약에서 알림 마이크로서비스로 예약 완료 내용을 전달되는 과정에 있어서 알림 마이크로서비스가 별도의 배포주기를 가지기 때문에 Eventual Consistency 방식으로 트랜잭션 처리함.
-    - 나머지 모든 inter-microservice 트랜잭션: 예약상태, 예약취소 등 모든 이벤트에 대해 알림 처리하는 등, 데이터 일관성의 시점이 크리티컬하지 않은 모든 경우가 대부분이라 판단, Eventual Consistency 를 기본으로 채택함.
-
-## 헥사고날 아키텍처 다이어그램 도출
-  ![슬라이드18](https://user-images.githubusercontent.com/61722732/89151539-2a543e80-d59c-11ea-9400-0aad70e06be4.JPG)
-
-  * Chris Richardson, MSA Patterns 참고하여 Inbound adaptor와 Outbound adaptor를 구분함
-  * 호출관계에서 PubSub 과 Req/Resp 를 구분함
-  * 서브 도메인과 바운디드 컨텍스트의 분리:  각 팀의 KPI 별로 아래와 같이 관심 구현 스토리를 나눠가짐
+    - 고객 주문시 결제처리:  결제가 완료되지 않은 주문을 절대 받지 않는다는 요건에 따라 ACID 트랜잭션 적용, 주문 완료 시 결제 처리에 대해서는 Request-Response 방식 처리
+    - 처리 상태 변경 시 알림 처리:  각 서비스 내 알림 마이크로서비스로 처리 상태 내용 전달 과정에 있어서 알림 마이크로서비스가 별도의 배포주기를 가지기 때문에 Eventual Consistency 방식으로 트랜잭션 처리
+    - 나머지 모든 inter-microservice 트랜잭션: 모든 이벤트에 대해 알림 처리하는 등, 데이터 일관성의 시점이 크리티컬하지 않은 모든 경우가 대부분이라 판단, Eventual Consistency 를 기본으로 채택함.
 
 
 # 구현:
