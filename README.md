@@ -1,4 +1,4 @@
-# hotelReservation
+# e-bookstore
 
 XX트 호텔 예약 서비스 따라하기
 
