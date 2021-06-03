@@ -109,7 +109,7 @@
 ### 모델 수정
   ![image](https://user-images.githubusercontent.com/43338817/120578710-37aeb380-c461-11eb-9698-01bcd4bc6037.png)
   
-  * 고객은 본인의 주문 내역 및 상태를 조회한다. (View를 추가혀여 요구사항 커버)
+  * 고객은 본인의 주문 내역 및 상태를 조회한다. (View를 추가하여 요구사항 커버)
 
 ### 비기능 요구사항 검증
   ![image](https://user-images.githubusercontent.com/43338817/120579448-7bee8380-c462-11eb-80ad-d353e2648d07.png)
@@ -118,6 +118,12 @@
     - 고객 주문시 결제처리:  결제가 완료되지 않은 주문을 절대 받지 않는다는 요건에 따라 ACID 트랜잭션 적용, 주문 완료 시 결제 처리에 대해서는 Request-Response 방식 처리
     - 처리 상태 변경 시 알림 처리:  각 서비스 내 알림 마이크로서비스로 처리 상태 내용 전달 과정에 있어서 알림 마이크로서비스가 별도의 배포주기를 가지기 때문에 Eventual Consistency 방식으로 트랜잭션 처리
     - 나머지 모든 inter-microservice 트랜잭션: 모든 이벤트에 대해 알림 처리하는 등, 데이터 일관성의 시점이 크리티컬하지 않은 모든 경우가 대부분이라 판단, Eventual Consistency 를 기본으로 채택함.
+
+
+### 모델 최종 수정
+  ![image](https://user-images.githubusercontent.com/43338817/120593768-e9a6a980-c47a-11eb-84e8-31408b9ffebf.png)
+  
+  * 주문 취소 시 배송 상황 여부 고려하여 취소가 가능하도록 하기 위하여 모델 최종 
 
 
 # 구현:
