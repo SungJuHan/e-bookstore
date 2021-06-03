@@ -126,10 +126,10 @@
 
 ```
 # eks cluster 생성
-eksctl create cluster --name team4-cluseter --version 1.15 --nodegroup-name standard-workers --node-type t3.medium --nodes 3 --nodes-min 1 --nodes-max 4
+eksctl create cluster --name user14-eks --version 1.17 --nodegroup-name standard-workers --node-type t3.medium --nodes 4 --nodes-min 1 --nodes-max 3
 
 # eks cluster 설정
-aws eks --region ap-northeast-2 update-kubeconfig --name team4-cluseter
+aws eks --region ap-southeast-2 update-kubeconfig --name user14-eks
 kubectl config current-context
 
 # metric server 설치
