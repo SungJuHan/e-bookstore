@@ -374,71 +374,14 @@ http POST http://order:8080/orders customerId=1 productId=1000 qty=1 pricd=17000
 ```
 ![image](https://user-images.githubusercontent.com/43338817/120755545-12957000-c549-11eb-8e98-ee282f143d4b.png)
 
-```
-# 결제서비스 재기동전에 아래의 비동기식 호출 기능 점검 테스트 수행 (siege 에서)
-http DELETE http://booking:8080/bookings/1 #Success
-# 결과
-root@siege:/# http DELETE http://booking:8080/bookings/1
-HTTP/1.1 204 No Content
-date: Wed, 05 Aug 2020 00:59:03 GMT
-server: envoy
-x-envoy-upstream-service-time: 35
-
-# 결제서비스 재기동
-$ kubectl apply -f pay.yaml
-
-NAME                           READY   STATUS    RESTARTS   AGE
-pod/alarm-bc469c66b-nn7r9      2/2     Running   0          18m
-pod/booking-6f85b67876-rhwl2   2/2     Running   0          18m
-pod/gateway-7bd59945-g9hdq     2/2     Running   0          18m
-pod/html-78f648d5b-zhv2b       2/2     Running   0          18m
-pod/mypage-7587b7598b-l86jl    2/2     Running   0          18m
-pod/pay-755d679cbf-7l7dq       2/2     Running   0          84s
-pod/room-6c8cff5b96-78chb      2/2     Running   0          18m
-pod/siege                      2/2     Running   0          17m
-
-
-# 예약처리 (siege 에서)
-http POST http://booking:8080/bookings roomId=1 name=호텔 price=1000 address=서울 host=Superman guest=배트맨 usedate=20201010 #Success
-http POST http://booking:8080/bookings roomId=2 name=펜션 price=1000 address=양평 host=Superman guest=홍길동 usedate=20201011 #Success
-
-# 처리결과
-HTTP/1.1 201 Created
-content-type: application/json;charset=UTF-8
-date: Wed, 05 Aug 2020 01:01:54 GMT
-location: http://booking:8080/bookings/3
-server: envoy
-transfer-encoding: chunked
-x-envoy-upstream-service-time: 326
-
-{
-    "_links": {
-        "booking": {
-            "href": "http://booking:8080/bookings/3"
-        },
-        "self": {
-            "href": "http://booking:8080/bookings/3"
-        }
-    },
-    "address": "서울",
-    "guest": "배트맨",
-    "host": "Superman",
-    "name": "호텔",
-    "price": 1000,
-    "roomId": 1,
-    "usedate": "20201010"
-}
-
-```
-
 - 또한 과도한 요청시에 서비스 장애가 도미노 처럼 벌어질 수 있다. (서킷브레이커, 폴백 처리는 운영단계에서 설명한다.)
 
 
 ## 비동기식 호출 / 시간적 디커플링 / 장애격리 / 최종 (Eventual) 일관성 테스트
 
-결제가 이루어진 후에 알림 처리는 동기식이 아니라 비 동기식으로 처리하여 알림 시스템의 처리를 위하여 예약이 블로킹 되지 않아도록 처리한다.
+결제가 이루어진 후에 매점 내 주문 관리 처리는 동기식이 아니라 비 동기식으로 처리하여 주문관리 시스템의 처리를 위하여 주문이 블로킹 되지 않아도록 처리한다.
  
-- 이를 위하여 예약관리, 결제관리에 기록을 남긴 후에 곧바로 완료되었다는 도메인 이벤트를 카프카로 송출한다(Publish)
+- 이를 위하여 기록을 남긴 후에 곧바로 완료되었다는 도메인 이벤트를 카프카로 송출한다(Publish)
 ```
 @Entity
 @Table(name="Payment_table")
@@ -448,69 +391,123 @@ public class Payment {
 
     @PostPersist
     public void onPostPersist(){
-        PayApproved payApproved = new PayApproved();
-        BeanUtils.copyProperties(this, payApproved);
-        payApproved.setStatus(getStatus());
-        payApproved.publishAfterCommit();
+        PaymentApproved paymentApproved = new PaymentApproved();
+        BeanUtils.copyProperties(this, paymentApproved);
+        paymentApproved.publishAfterCommit();
     }
 
 }
 ```
 
-- 알림 서비스에서는 예약완료, 결제승인 이벤트에 대해서 이를 수신하여 자신의 정책을 처리하도록 PolicyHandler 를 구현한다:
+- 주문관리 서비스에서는 주문접수,결제승인,주문취소 이벤트에 대해서 이를 수신하여 자신의 정책을 처리하도록 PolicyHandler 를 구현한다:
 ```
 @Service
 public class PolicyHandler{
+    @Autowired OrderManagementRepository orderManagementRepository;
 
     @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverPayApproved_Notify(@Payload PayApproved payApproved){
-        if(payApproved.isMe()){
-            System.out.println("##### listener Notify : " + payApproved.toJson());
+    public void wheneverPaymentApproved_ReceptOrder(@Payload PaymentApproved paymentApproved){
+
+        if(!paymentApproved.validate()) return;
+
+        System.out.println("\n\n##### listener ReceptOrder : " + paymentApproved.toJson() + "\n\n");
+
+        List<OrderManagement> orderManagementList = orderManagementRepository.findByOrderId(paymentApproved.getOrderId());
+
+        for(OrderManagement orderManagement : orderManagementList) {
+            orderManagement.setStatus("PayApproved");
+            orderManagementRepository.save(orderManagement);
+        }
+            
+    }
+    @StreamListener(KafkaProcessor.INPUT)
+    public void wheneverOrderCanceled_CancelOrder(@Payload OrderCanceled orderCanceled){
+
+        if(!orderCanceled.validate()) return;
+
+        System.out.println("\n\n##### listener CancelOrder : " + orderCanceled.toJson() + "\n\n");
+
+        List<OrderManagement> orderManagementList = orderManagementRepository.findByOrderId(orderCanceled.getId());
+
+        for(OrderManagement orderManagement : orderManagementList) {
+            orderManagement.setStatus("OrderCanceled");
+            orderManagementRepository.save(orderManagement);
         }
     }
     @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverPayCanceled_Notify(@Payload PayCanceled payCanceled){
-        if(payCanceled.isMe()){
-            System.out.println("##### listener Notify : " + payCanceled.toJson());
-        }
+    public void wheneverOrdered_Creation(@Payload Ordered ordered){
+
+        if(!ordered.validate()) return;
+
+        System.out.println("\n\n##### listener Creation : " + ordered.toJson() + "\n\n");
+
+        OrderManagement orderManagement = new OrderManagement();
+        orderManagement.setCustomerId(ordered.getCustomerId());
+        orderManagement.setOrderId(ordered.getId());
+        orderManagement.setProductId(ordered.getProductId());
+        orderManagement.setQty(ordered.getQty());
+        orderManagement.setDestination(ordered.getDestination());
+        orderManagement.setStatus("Created");
+
+        orderManagementRepository.save(orderManagement);
     }
-```
 
-- 실제 구현을 하자면, 카톡 등으로 알림을 처리합니다.:
-```
-@Service
-public class PolicyHandler{
-
-    @Autowired
-    private AlarmRepository alarmRepository;
 
     @StreamListener(KafkaProcessor.INPUT)
-    public void wheneverPayApproved_Notify(@Payload PayApproved payApproved){
-        if(payApproved.isMe()){
-            addNotificationHistory(payApproved.getGuest(), "PayApproved");
-            addNotificationHistory(payApproved.getHost(), "PayApproved");
-        }
-    }
- ```
+    public void whatever(@Payload String eventString){}
 
-알림 시스템은 예약/결제와 완전히 분리되어있으며, 이벤트 수신에 따라 처리되기 때문에, 알림 시스템이 유지보수로 인해 잠시 내려간 상태라도 예약을 받는데 문제가 없다:
+
+}
 ```
-# 알림 서비스를 잠시 내려놓음
-kubectl delete -f alarm.yaml
 
-# 예약처리 (siege 에서)
-http POST http://booking:8080/bookings roomId=1 name=호텔 price=1000 address=서울 host=Superman guest=배트맨 usedate=20201010 #Success
-http POST http://booking:8080/bookings roomId=2 name=펜션 price=1000 address=양평 host=Superman guest=홍길동 usedate=20201011 #Success
+ 시스템은 주문/결제와 완전히 분리되어있으며, 이벤트 수신에 따라 처리되기 때문에, 주문관리 시스템이 유지보수로 인해 잠시 내려간 상태라도 주문을 받는데 문제가 없다:
+```
+# 상점 서비스를 잠시 내려놓음
+kubectl delete -f store.yaml
 
+# 주문처리 (siege 에서)
+http POST http://order:8080/orders customerId=1 productId=1000 qty=1 pricd=17000 destination=Seoul #Success
+```
+![image](https://user-images.githubusercontent.com/43338817/120758962-6e61f800-c54d-11eb-9c04-39c966f4d601.png)
+
+```
 # 알림이력 확인 (siege 에서)
-http http://alarm:8080/alarms # 알림이력조회 불가
-
-# 알림 서비스 기동
-kubectl apply -f alarm.yaml
-
-# 알림이력 확인 (siege 에서)
-http http://alarm:8080/alarms # 알림이력조회
+http GET http://store:8080/orderManagements # 주문관리조회 불가
 ```
+![image](https://user-images.githubusercontent.com/43338817/120759031-820d5e80-c54d-11eb-8ebd-a6836426d6aa.png)
+
+
+```
+# 상점 서비스 기동
+kubectl apply -f store.yaml
+
+# 주문관리 확인 (siege 에서)
+http GET http://store:8080/orderManagements # 주문관리조회
+```
+![image](https://user-images.githubusercontent.com/43338817/120759153-abc68580-c54d-11eb-8d5a-bd4cbc3aabf1.png)
+
+## Polyglot
+
+```
+# Payment - pom.xml
+
+		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+
+# Alarm - pom.xml
+
+		<dependency>
+			<groupId>org.hsqldb</groupId>
+			<artifactId>hsqldb</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+```
+
 
 # 운영
 
@@ -533,249 +530,136 @@ kubectl label namespace mybnb istio-injection=enabled
 - 동시사용자 100명
 - 60초 동안 실시
 ```
-$ siege -v -c100 -t60S -r10 --content-type "application/json" 'http://booking:8080/bookings POST {"roomId":1, "name":"호텔", "price":1000, "address":"서울", "host":"Superman", "guest":"배트맨", "usedate":"20201230"}'
+$ siege -v -c100 -t60S -r10 --content-type "application/json" 'http://order:8080/orders POST {"customerId":1, "productId":"1000", "qty":1, "price":17000, "destination":"서울"}'
 
-HTTP/1.1 201     2.19 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     3.91 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     2.22 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     2.30 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     2.23 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     2.06 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.11 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     2.02 secs:     321 bytes ==> POST http://booking:8080/bookings
+
+HTTP/1.1 201     1.88 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     2.08 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.92 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.90 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.89 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.90 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.90 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.70 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     3.42 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.71 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.80 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.78 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.10 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.79 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.12 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.20 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.59 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.20 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.90 secs:     260 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.60 secs:     260 bytes ==> POST http://order:8080/orders
 
 ```
 * 서킷 브레이킹을 위한 DestinationRule 적용
 ```
-cd mybnb/yaml
-kubectl apply -f dr-pay.yaml
+cd  ../yaml
+kubectl apply -f dr-payment.yaml
 
-HTTP/1.1 500     0.28 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.35 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.28 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.29 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.41 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.15 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.24 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.41 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.21 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.33 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.43 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.34 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.32 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.33 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.36 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.33 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.34 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.43 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.46 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.38 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.33 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.39 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.49 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.21 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.32 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.42 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.38 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     0.28 secs:     250 bytes ==> POST http://booking:8080/bookings
+$ siege -v -c100 -t60S -r10 --content-type "application/json" 'http://order:8080/orders POST {"customerId":1, "productId":"1000", "qty":1, "price":17000, "destination":"서울"}'
+HTTP/1.1 500     0.38 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.59 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.27 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.63 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.68 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.68 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.71 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.72 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.73 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.67 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.52 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.57 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.80 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.39 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.81 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.65 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.27 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.49 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.46 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.51 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     1.06 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.88 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.67 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.56 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.58 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.49 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.96 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.31 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.46 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.74 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.77 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.71 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.78 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.72 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.84 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.72 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     1.03 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.62 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.62 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.77 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.63 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.98 secs:     248 bytes ==> POST http://order:8080/orders
+HTTP/1.1 500     0.94 secs:     248 bytes ==> POST http://order:8080/orders
+...
 
-Transactions:                   1986 hits
-Availability:                  63.88 %
-Elapsed time:                  47.75 secs
-Data transferred:               0.88 MB
-Response time:                  2.39 secs
-Transaction rate:              41.59 trans/sec
-Throughput:                     0.02 MB/sec
-Concurrency:                   99.57
-Successful transactions:        1986
+Transactions:                     69 hits
+Availability:                   5.79 %
+Elapsed time:                   7.49 secs
+Data transferred:               0.28 MB
+Response time:                 10.68 secs
+Transaction rate:               9.21 trans/sec
+Throughput:                     0.04 MB/sec
+Concurrency:                   98.42
+Successful transactions:          69
 Failed transactions:            1123
-Longest transaction:            7.53
-Shortest transaction:           0.05
+Longest transaction:            1.85
+Shortest transaction:           0.02
 ```
-
-* DestinationRule 적용되어 서킷 브레이킹 동작 확인 (kiali 화면)
-![슬라이드4](https://user-images.githubusercontent.com/61722732/89362532-167a1b00-d709-11ea-8981-07bf788080b5.JPG)
-
 
 * 다시 부하 발생하여 DestinationRule 적용 제거하여 정상 처리 확인
 ```
-cd mybnb/yaml
-kubectl delete -f dr-pay.yaml
+$ kubectl delete -f dr-payment.yaml
+
+$ siege -v -c100 -t60S -r10 --content-type "application/json" 'http://order:8080/orders POST {"customerId":1, "productId":"1000", "qty":1, "price":17000, "destination":"서울"}'
+
+HTTP/1.1 201     0.10 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.68 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.68 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.68 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.68 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.67 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.69 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     0.70 secs:     264 bytes ==> POST http://order:8080/orders
+HTTP/1.1 201     1.49 secs:     264 bytes ==> POST http://order:8080/orders
+
+Lifting the server siege...
+Transactions:                   7830 hits
+Availability:                 100.00 %
+Elapsed time:                  59.57 secs
+Data transferred:               1.96 MB
+Response time:                  0.75 secs
+Transaction rate:             131.44 trans/sec
+Throughput:                     0.03 MB/sec
+Concurrency:                   99.05
+Successful transactions:        7830
+Failed transactions:               0
+Longest transaction:            3.55
+Shortest transaction:           0.01
 ```
-
-### 방식2) 서킷 브레이킹 프레임워크의 선택: Spring FeignClient + Hystrix 옵션을 사용하여 구현함
-
-시나리오는 예약-->결제 시의 연결을 RESTful Request/Response 로 연동하여 구현이 되어있고, 결제 요청이 과도할 경우 CB 를 통하여 장애격리.
-
-* Hystrix 를 설정:  요청처리 쓰레드에서 처리시간이 610 밀리가 넘어서기 시작하여 어느정도 유지되면 CB 회로가 닫히도록 (요청을 빠르게 실패처리, 차단) 설정
-- kubectl apply -f booking_cb.yaml 실행
-```
-# application.yml
-
-feign:
-  hystrix:
-    enabled: true
-
-hystrix:
-  command:
-    default:
-      execution.isolation.thread.timeoutInMilliseconds: 610
-
-```
-
-* 피호출 서비스(결제) 의 임의 부하 처리 - 400 밀리에서 증감 220 밀리 정도 왔다갔다 하게
-- kubectl apply -f pay_cb.yaml 
-```
-# Payment.java (Entity)
-
-    @PrePersist
-    public void onPrePersist(){  //결제이력을 저장한 후 적당한 시간 끌기
-
-        ...
-        
-        try {
-            Thread.currentThread().sleep((long) (400 + Math.random() * 220));
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-```
-
-* 부하테스터 siege 툴을 통한 서킷 브레이커 동작 확인:
-- 동시사용자 100명
-- 60초 동안 실시
-
-```
-$ siege -v -c100 -t60S -r10 --content-type "application/json" 'http://booking:8080/bookings POST {"roomId":1, "name":"호텔", "price":1000, "address":"서울", "host":"Superman", "guest":"배트맨", "usedate":"20201230"}'
-
-** SIEGE 4.0.4
-** Preparing 100 concurrent users for battle.
-The server is now under siege...
-
-HTTP/1.1 201     4.75 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.65 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.80 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.49 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.40 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.48 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.51 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.29 secs:     321 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     4.46 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.84 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     4.15 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.32 secs:     321 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     4.43 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     4.31 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.32 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.29 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.38 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.22 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.43 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.31 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.17 secs:     321 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     4.45 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     4.18 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.18 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.10 secs:     321 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     3.54 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.59 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.48 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     4.14 secs:     321 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     3.48 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.74 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.47 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     4.27 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     8.48 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     3.98 secs:     321 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     3.13 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.21 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     0.56 secs:     321 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     3.12 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.14 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.04 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.16 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.89 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.09 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     3.19 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.77 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     4.15 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     3.66 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.65 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     4.33 secs:     321 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     1.74 secs:     323 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.53 secs:     323 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     1.87 secs:     323 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     1.16 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.16 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     2.85 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     1.28 secs:     323 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     1.23 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.22 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 201     1.86 secs:     323 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     1.87 secs:     323 bytes ==> POST http://booking:8080/bookings
-
-HTTP/1.1 500     1.21 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.22 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.24 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.17 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.23 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.12 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.08 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.16 secs:     250 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 500     1.16 secs:     250 bytes ==> POST http://booking:8080/bookings
-
-Lifting the server siege...siege aborted due to excessive socket failure; you
-can change the failure threshold in $HOME/.siegerc
-
-Transactions:                    796 hits
-Availability:                  42.98 %
-Elapsed time:                  59.06 secs
-Data transferred:               0.50 MB
-Response time:                  7.32 secs
-Transaction rate:              13.48 trans/sec
-Throughput:                     0.01 MB/sec
-Concurrency:                   98.61
-Successful transactions:         796
-Failed transactions:            1056
-Longest transaction:           10.77
-Shortest transaction:           0.08
-```
-- 운영시스템은 죽지 않고 지속적으로 CB 에 의하여 적절히 회로가 열림과 닫힘이 벌어지면서 자원을 보호하고 있음을 보여줌. 하지만, 42.985% 가 성공하였고, 67%가 실패했다는 것은 고객 사용성에 있어 좋지 않기 때문에 동적 Scale out (replica의 자동적 추가,HPA) 을 통하여 시스템을 확장 해주는 후속처리가 필요.
-
-- Availability 가 높아진 것을 확인 (siege)
 
 ### 오토스케일 아웃
 앞서 CB 는 시스템을 안정되게 운영할 수 있게 해줬지만 사용자의 요청을 100% 받아들여주지 못했기 때문에 이에 대한 보완책으로 자동화된 확장 기능을 적용하고자 한다. 
 
 * (istio injection 적용한 경우) istio injection 적용 해제
 ```
-kubectl label namespace mybnb istio-injection=disabled --overwrite
+kubectl label namespace mybs istio-injection=disabled --overwrite
 
-kubectl apply -f booking.yaml
-kubectl apply -f pay.yaml
-```
-
-* (Spring FeignClient + Hystrix 적용한 경우) 위에서 설정된 CB는 제거해야함.
-```
-kubectl apply -f booking.yaml
-kubectl apply -f pay.yaml
+kubectl apply -f order.yaml
+kubectl apply -f payment.yaml
 ```
 
 - 결제서비스 배포시 resource 설정 적용되어 있음
@@ -790,92 +674,80 @@ kubectl apply -f pay.yaml
               cpu: 200m
 ```
 
-- 결제서비스에 대한 replica 를 동적으로 늘려주도록 HPA 를 설정한다. 설정은 CPU 사용량이 15프로를 넘어서면 replica 를 3개까지 늘려준다:
+- 결제서비스에 대한 replica 를 동적으로 늘려주도록 HPA 를 설정한다. 설정은 CPU 사용량이 3프로를 넘어서면 replica 를 3개까지 늘려준다:
 ```
-kubectl autoscale deploy pay -n mybnb --min=1 --max=3 --cpu-percent=15
+kubectl autoscale deploy payment -n mybs --min=1 --max=3 --cpu-percent=3
 
 # 적용 내용
-NAME                           READY   STATUS    RESTARTS   AGE
-pod/alarm-bc469c66b-nn7r9      2/2     Running   0          25m
-pod/booking-6f85b67876-rhwl2   2/2     Running   0          25m
-pod/gateway-7bd59945-g9hdq     2/2     Running   0          25m
-pod/html-78f648d5b-zhv2b       2/2     Running   0          25m
-pod/mypage-7587b7598b-l86jl    2/2     Running   0          25m
-pod/pay-755d679cbf-7l7dq       2/2     Running   0          8m58s
-pod/room-6c8cff5b96-78chb      2/2     Running   0          25m
-pod/siege                      2/2     Running   0          25m
+NAME                            READY   STATUS             RESTARTS   AGE
+pod/alarm-7fcb6c7cbf-6rkh9      2/2     Running            0          78m
+pod/delivery-6978b6c54f-x6g7f   1/2     CrashLoopBackOff   18         77m
+pod/gateway-64d747bbf5-7lxvw    2/2     Running            0          77m
+pod/mypage-8596db5cb6-l4266     2/2     Running            0          77m
+pod/order-65c9989544-jvkpr      1/1     Running            0          92s
+pod/payment-75d746f8f5-rcbpd    2/2     Running            0          17m
+pod/siege                       1/1     Running            0          23h
+pod/store-64df585774-pj4wk      2/2     Running            0          12m
 
-NAME              TYPE           CLUSTER-IP       EXTERNAL-IP                                                                   PORT(S)          AGE
-service/alarm     ClusterIP      10.100.36.234    <none>                                                                        8080/TCP         25m
-service/booking   ClusterIP      10.100.19.222    <none>                                                                        8080/TCP         25m
-service/gateway   LoadBalancer   10.100.195.171   a59f2304940914b7ca3875b12e62e321-738700923.ap-northeast-2.elb.amazonaws.com   8080:31754/TCP   25m
-service/html      ClusterIP      10.100.19.81     <none>                                                                        8080/TCP         25m
-service/mypage    ClusterIP      10.100.134.37    <none>                                                                        8080/TCP         25m
-service/pay       ClusterIP      10.100.97.43     <none>                                                                        8080/TCP         8m58s
-service/room      ClusterIP      10.100.78.233    <none>                                                                        8080/TCP         25m
+NAME               TYPE           CLUSTER-IP       EXTERNAL-IP                                                                   PORT(S)          AGE
+service/alarm      ClusterIP      10.100.40.168    <none>                                                                        8080/TCP         78m
+service/delivery   ClusterIP      10.100.113.127   <none>                                                                        8080/TCP         77m
+service/gateway    LoadBalancer   10.100.197.65    a21e1b8df84fe450495addbd7f61900d-492082344.ap-southeast-2.elb.amazonaws.com   8080:32024/TCP   77m
+service/mypage     ClusterIP      10.100.96.130    <none>                                                                        8080/TCP         77m
+service/order      ClusterIP      10.100.198.254   <none>                                                                        8080/TCP         91s
+service/payment    ClusterIP      10.100.187.240   <none>                                                                        8080/TCP         17m
+service/store      ClusterIP      10.100.30.175    <none>                                                                        8080/TCP         12m
 
-NAME                      READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/alarm     1/1     1            1           25m
-deployment.apps/booking   1/1     1            1           25m
-deployment.apps/gateway   1/1     1            1           25m
-deployment.apps/html      1/1     1            1           25m
-deployment.apps/mypage    1/1     1            1           25m
-deployment.apps/pay       1/1     1            1           8m58s
-deployment.apps/room      1/1     1            1           25m
+NAME                       READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/alarm      1/1     1            1           78m
+deployment.apps/delivery   0/1     1            0           77m
+deployment.apps/gateway    1/1     1            1           77m
+deployment.apps/mypage     1/1     1            1           77m
+deployment.apps/order      1/1     1            1           92s
+deployment.apps/payment    1/1     1            1           17m
+deployment.apps/store      1/1     1            1           12m
 
-NAME                                 DESIRED   CURRENT   READY   AGE
-replicaset.apps/alarm-bc469c66b      1         1         1       25m
-replicaset.apps/booking-6f85b67876   1         1         1       25m
-replicaset.apps/gateway-7bd59945     1         1         1       25m
-replicaset.apps/html-78f648d5b       1         1         1       25m
-replicaset.apps/mypage-7587b7598b    1         1         1       25m
-replicaset.apps/pay-755d679cbf       1         1         1       8m58s
-replicaset.apps/room-6c8cff5b96      1         1         1       25m
+NAME                                  DESIRED   CURRENT   READY   AGE
+replicaset.apps/alarm-7fcb6c7cbf      1         1         1       78m
+replicaset.apps/delivery-6978b6c54f   1         1         0       77m
+replicaset.apps/gateway-64d747bbf5    1         1         1       77m
+replicaset.apps/mypage-8596db5cb6     1         1         1       77m
+replicaset.apps/order-65c9989544      1         1         1       92s
+replicaset.apps/payment-75d746f8f5    1         1         1       17m
+replicaset.apps/store-64df585774      1         1         1       12m
 
-NAME                                      REFERENCE        TARGETS         MINPODS   MAXPODS   REPLICAS   AGE
-horizontalpodautoscaler.autoscaling/pay   Deployment/pay   <unknown>/15%   1         3         0          7s
+NAME                                          REFERENCE            TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/payment   Deployment/payment   <unknown>/3%   1         3         0          8s
 ```
 
-- CB 에서 했던 방식대로 워크로드를 3분 동안 걸어준다.
+- CB 에서 했던 방식대로 워크로드를 3분 동안 걸어준다. (CB보다 오토스케일이 나타나는 모습을 빠르게 보여주도록 -c255로 설정하여 부하를 가중한다.)
 ```
-$ siege -v -c100 -t180S -r10 --content-type "application/json" 'http://booking:8080/bookings POST {"roomId":1, "name":"호텔", "price":1000, "address":"서울", "host":"Superman", "guest":"배트맨", "usedate":"20201230"}'
+$ siege -v -c255 -t180S -r10 --content-type "application/json" 'http://order:8080/orders POST {"customerId":1, "productId":"1000", "qty":1, "price":17000, "destination":"서울"}'
 
 ```
 - 오토스케일이 어떻게 되고 있는지 모니터링을 걸어둔다:
 ```
-kubectl get deploy pay -n mybnb -w 
+kubectl get deploy payment -n mybs -w
 ```
 - 어느정도 시간이 흐른 후 (약 30초) 스케일 아웃이 벌어지는 것을 확인할 수 있다:
-```
-NAME   READY   UP-TO-DATE   AVAILABLE   AGE
-pay    1/1     1            1           4m21s
-pay    1/2     1            1           4m28s
-pay    1/2     1            1           4m28s
-pay    1/2     1            1           4m28s
-pay    1/2     2            1           4m28s
-pay    1/3     2            1           4m43s
-pay    1/3     2            1           4m43s
-pay    1/3     2            1           4m43s
-pay    1/3     3            1           4m43s
-pay    2/3     3            2           5m53s
-pay    3/3     3            3           5m59s
-:
-```
+
+![image](https://user-images.githubusercontent.com/43338817/120760852-8c305c80-c54f-11eb-81bf-7c8314a6a486.png)
+
 - siege 의 로그를 보아도 전체적인 성공률이 높아진 것을 확인 할 수 있다. 
 ```
 Lifting the server siege...
-Transactions:                  26446 hits
+Transactions:                  29713 hits
 Availability:                 100.00 %
-Elapsed time:                 179.76 secs
-Data transferred:               8.73 MB
-Response time:                  0.68 secs
-Transaction rate:             147.12 trans/sec
-Throughput:                     0.05 MB/sec
-Concurrency:                   99.60
-Successful transactions:       26446
+Elapsed time:                 179.91 secs
+Data transferred:               7.46 MB
+Response time:                  1.54 secs
+Transaction rate:             165.15 trans/sec
+Throughput:                     0.04 MB/sec
+Concurrency:                  253.63
+Successful transactions:       29713
 Failed transactions:               0
-Longest transaction:            5.85
-Shortest transaction:           0.00
+Longest transaction:           19.22
+Shortest transaction:           0.06
 ```
 
 ## 무정지 재배포
@@ -885,16 +757,25 @@ Shortest transaction:           0.00
 
 - seige 로 배포작업 직전에 워크로드를 모니터링 함.
 ```
-$ siege -v -c1 -t300S -r10 --content-type "application/json" 'http://booking:8080/bookings'
+$  siege -v -c1 -t300S -r10 --content-type "application/json" 'http://order:8080/orders'
 
 ** SIEGE 4.0.5
 ** Preparing 100 concurrent users for battle.
 The server is now under siege...
 
-HTTP/1.1 201     0.68 secs:     207 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.68 secs:     207 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.70 secs:     207 bytes ==> POST http://booking:8080/bookings
-HTTP/1.1 201     0.70 secs:     207 bytes ==> POST http://booking:8080/bookings
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.01 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.01 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.01 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
+HTTP/1.1 200     0.00 secs:     344 bytes ==> GET  /orders
 :
 
 ```
@@ -902,56 +783,59 @@ HTTP/1.1 201     0.70 secs:     207 bytes ==> POST http://booking:8080/bookings
 - 새버전으로의 배포 시작
 ```
 # 컨테이너 이미지 Update (readness, liveness 미설정 상태)
-- kubectl apply -f booking_na.yaml 실행
+- kubectl apply -f order_na.yaml
 
 ```
 
 - seige 의 화면으로 넘어가서 Availability 가 100% 미만으로 떨어졌는지 확인
 ```
-Transactions:                  18182 hits
-Availability:                  94.67 %
-Elapsed time:                  56.86 secs
-Data transferred:               6.14 MB
-Response time:                  0.00 secs
-Transaction rate:             319.77 trans/sec
-Throughput:                     0.11 MB/sec
-Concurrency:                    0.93
-Successful transactions:       18182
+Transactions:                   3590 hits
+Availability:                  77.81 %
+Elapsed time:                  28.35 secs
+Data transferred:              23.60 MB
+Response time:                  0.01 secs
+Transaction rate:             126.63 trans/sec
+Throughput:                     0.83 MB/sec
+Concurrency:                    0.95
+Successful transactions:        3590
 Failed transactions:            1024
-Longest transaction:            0.73
+Longest transaction:            0.55
 Shortest transaction:           0.00
 
 ```
 - 배포기간중 Availability 가 평소 100%에서 70% 대로 떨어지는 것을 확인. 원인은 쿠버네티스가 성급하게 새로 올려진 서비스를 READY 상태로 인식하여 서비스 유입을 진행한 것이기 때문. 이를 막기위해 Readiness Probe 를 설정함:
 ```
 # deployment.yaml 의 readiness probe 의 설정:
-- kubectl apply -f booking.yaml 실행
+- kubectl apply -f order.yaml 실행
 
-NAME                           READY   STATUS        RESTARTS   AGE
-pod/alarm-bc469c66b-nn7r9      2/2     Running       1          58m
-pod/booking-67d766dc78-xzrzr   1/1     Terminating   0          73s
-pod/booking-6f85b67876-94nxl   1/1     Running       0          34s
-pod/gateway-7bd59945-g9hdq     2/2     Running       0          58m
-pod/html-78f648d5b-zhv2b       2/2     Running       0          58m
-pod/pay-755d679cbf-f56nd       1/1     Running       0          3m33s
-pod/pay-755d679cbf-lmtvh       1/1     Running       0          8m16s
-pod/pay-755d679cbf-qjbw6       1/1     Running       0          3m48s
-pod/siege                      1/1     Running       0          13m
+root@labs--1546259050:/home/project/e-bookstore/yaml# kubectl get pod -n mybs
+NAME                        READY   STATUS             RESTARTS   AGE
+alarm-7fcb6c7cbf-6rkh9      2/2     Running            0          86m
+delivery-6978b6c54f-x6g7f   1/2     CrashLoopBackOff   20         86m
+gateway-64d747bbf5-7lxvw    2/2     Running            0          86m
+mypage-8596db5cb6-l4266     2/2     Running            0          86m
+order-65c9989544-jm9gl      1/1     Running            0          48s
+payment-75d746f8f5-rcbpd    2/2     Running            0          26m
+payment-75d746f8f5-rlsdm    1/1     Running            0          7m11s
+payment-75d746f8f5-zjtpb    1/1     Running            0          8m43s
+siege                       1/1     Running            0          23h
+store-64df585774-pj4wk      2/2     Running            0          21m
 ```
 
 - 동일한 시나리오로 재배포 한 후 Availability 확인:
 ```
-Transactions:                  13547 hits
+Lifting the server siege...
+Transactions:                  93648 hits
 Availability:                 100.00 %
-Elapsed time:                  41.53 secs
-Data transferred:               4.57 MB
+Elapsed time:                 299.45 secs
+Data transferred:              30.72 MB
 Response time:                  0.00 secs
-Transaction rate:             326.20 trans/sec
-Throughput:                     0.11 MB/sec
-Concurrency:                    0.94
-Successful transactions:       13547
+Transaction rate:             312.73 trans/sec
+Throughput:                     0.10 MB/sec
+Concurrency:                    0.97
+Successful transactions:       93648
 Failed transactions:               0
-Longest transaction:            0.70
+Longest transaction:            0.52
 Shortest transaction:           0.00
 
 ```
@@ -968,132 +852,78 @@ Shortest transaction:           0.00
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mybnb-config
-  namespace: mybnb
+  name: mybs-config
+  namespace: mybs
 data:
-  api.url.payment: http://pay:8080
+  api.url.payment: http://payment:8080
   alarm.prefix: Hello
 ```
-* booking.yaml (configmap 사용)
+* order.yaml (configmap 사용)
 ```
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: booking
-  namespace: mybnb
+  name: order
+  namespace: mybs
   labels:
-    app: booking
+    app: order
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: booking
+      app: order
   template:
     metadata:
       labels:
-        app: booking
+        app: order
     spec:
       containers:
-        - name: booking
-          image: 496278789073.dkr.ecr.ap-northeast-2.amazonaws.com/mybnb-booking:latest
+        - name: order
+          image: 879772956301.dkr.ecr.ap-southeast-2.amazonaws.com/user14-order:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:
             - name: api.url.payment
               valueFrom:
                 configMapKeyRef:
-                  name: mybnb-config
+                  name: mybs-config
                   key: api.url.payment
-          resources:
+          readinessProbe:
+            httpGet:
+              path: '/actuator/health'
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: '/actuator/health'
+              port: 8080
+            initialDelaySeconds: 120
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 5
 ```
-* kubectl describe pod/booking-588cb89c6b-gmw8h -n mybnb
+* kubectl describe pod/order-65c9989544-jm9gl -n mybs
 ```
 Containers:
-  booking:
-    Container ID:   docker://0b90fe0d06629fc367fa83273abecba2724958a0b838c058553d193a86c3e0fe
-    Image:          496278789073.dkr.ecr.ap-northeast-2.amazonaws.com/mybnb-booking:latest
-    Image ID:       docker-pullable://496278789073.dkr.ecr.ap-northeast-2.amazonaws.com/mybnb-booking@sha256:59abe6ec02e165fda1c8e3dbf3e8bcedf7fb5edc53fcffca5f708a70969452f3
+  order:
+    Container ID:   docker://a2a234e1e3db8825c93037c8aa1c70c9130d20770ea3d0d641e4118185c0584e
+    Image:          879772956301.dkr.ecr.ap-southeast-2.amazonaws.com/user14-order:latest
+    Image ID:       docker-pullable://879772956301.dkr.ecr.ap-southeast-2.amazonaws.com/user14-order@sha256:307387a203d7bd44fd9484d5676206356d0a70b4af899632fc8558de8c65e3e4
     Port:           8080/TCP
     Host Port:      0/TCP
     State:          Running
-      Started:      Mon, 03 Aug 2020 16:48:56 +0900
+      Started:      Fri, 04 Jun 2021 07:17:42 +0000
     Ready:          True
     Restart Count:  0
-    Limits:
-      cpu:  500m
-    Requests:
-      cpu:      200m
-    Liveness:   http-get http://:8080/actuator/health delay=120s timeout=2s period=5s #success=1 #failure=5
-    Readiness:  http-get http://:8080/actuator/health delay=10s timeout=2s period=5s #success=1 #failure=10
+    Liveness:       http-get http://:8080/actuator/health delay=120s timeout=2s period=5s #success=1 #failure=5
+    Readiness:      http-get http://:8080/actuator/health delay=10s timeout=2s period=5s #success=1 #failure=10
     Environment:
-      api.url.payment:  <set to the key 'api.url.payment' of config map 'mybnb-config'>  Optional: false
+      api.url.payment:  <set to the key 'api.url.payment' of config map 'mybs-config'>  Optional: false
     Mounts:
-      /var/run/secrets/kubernetes.io/serviceaccount from default-token-mrczz (ro)
-```
-
-# 신규 개발 조직의 추가
-
-  ![image](https://user-images.githubusercontent.com/487999/79684133-1d6c4300-826a-11ea-94a2-602e61814ebf.png)
-
-
-## 마케팅팀의 추가
-    - KPI: 신규 고객의 유입률 증대와 기존 고객의 충성도 향상
-    - 구현계획 마이크로 서비스: 기존 customer 마이크로 서비스를 인수하며, 고객에 음식 및 맛집 추천 서비스 등을 제공할 예정
-
-## 이벤트 스토밍 
-    ![image](https://user-images.githubusercontent.com/487999/79685356-2b729180-8273-11ea-9361-a434065f2249.png)
-
-
-## 헥사고날 아키텍처 변화 
-
-![image](https://user-images.githubusercontent.com/487999/79685243-1d704100-8272-11ea-8ef6-f4869c509996.png)
-
-## 구현  
-
-기존의 마이크로 서비스에 수정을 발생시키지 않도록 Inbund 요청을 REST 가 아닌 Event 를 Subscribe 하는 방식으로 구현. 기존 마이크로 서비스에 대하여 아키텍처나 기존 마이크로 서비스들의 데이터베이스 구조와 관계없이 추가됨. 
-
-## 운영과 Retirement
-
-Request/Response 방식으로 구현하지 않았기 때문에 서비스가 더이상 불필요해져도 Deployment 에서 제거되면 기존 마이크로 서비스에 어떤 영향도 주지 않음.
-
-* [비교] 결제 (pay) 마이크로서비스의 경우 API 변화나 Retire 시에 app(주문) 마이크로 서비스의 변경을 초래함:
-
-예) API 변화시
-```
-# Order.java (Entity)
-
-    @PostPersist
-    public void onPostPersist(){
-
-        fooddelivery.external.결제이력 pay = new fooddelivery.external.결제이력();
-        pay.setOrderId(getOrderId());
-        
-        Application.applicationContext.getBean(fooddelivery.external.결제이력Service.class)
-                .결제(pay);
-
-                --> 
-
-        Application.applicationContext.getBean(fooddelivery.external.결제이력Service.class)
-                .결제2(pay);
-
-    }
-```
-
-예) Retire 시
-```
-# Order.java (Entity)
-
-    @PostPersist
-    public void onPostPersist(){
-
-        /**
-        fooddelivery.external.결제이력 pay = new fooddelivery.external.결제이력();
-        pay.setOrderId(getOrderId());
-        
-        Application.applicationContext.getBean(fooddelivery.external.결제이력Service.class)
-                .결제(pay);
-
-        **/
-    }
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-ppdmr (ro)
 ```
 
