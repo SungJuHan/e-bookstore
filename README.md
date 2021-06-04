@@ -299,14 +299,6 @@ http GET http://store:8080/orderManagements/1
 
 - HTML 화면을 통해서 각 서비스 기능 수행
 
-## 폴리글랏 퍼시스턴스
-
-  * 각 마이크로서비스의 특성에 따라 데이터 저장소를 RDB, DocumentDB/NoSQL 등 다양하게 사용할 수 있지만, 시간적/환경적 특성상 모두 H2 메모리DB를 적용하였다.
-
-## 폴리글랏 프로그래밍
-  
-  * 각 마이크로서비스의 특성에 따라 다양한 프로그래밍 언어를 사용하여 구현할 수 있지만, 시간적/환경적 특성상 Java를 이용하여 구현하였다.
-
 ## 동기식 호출 과 Fallback 처리
 
 분석단계에서의 조건 중 하나로 주문->결제 간의 호출은 동기식 일관성을 유지하는 트랜잭션으로 처리하기로 하였다. 호출 프로토콜은 이미 앞서 Rest Repository 에 의해 노출되어있는 REST 서비스를 FeignClient 를 이용하여 호출하도록 한다. 
@@ -508,6 +500,84 @@ http GET http://store:8080/orderManagements # 주문관리조회
 
 ```
 
+## Correlation Test
+```
+root@siege:/# http POST http://order:8080/orders customerId=1 productId=1000 qty=1 pricd=17000 destination=Seongnam
+HTTP/1.1 201 
+Content-Type: application/json;charset=UTF-8
+Date: Fri, 04 Jun 2021 07:33:55 GMT
+Location: http://order:8080/orders/1
+Transfer-Encoding: chunked
+
+{
+    "_links": {
+        "order": {
+            "href": "http://order:8080/orders/1"
+        },
+        "self": {
+            "href": "http://order:8080/orders/1"
+        }
+    },
+    "customerId": 1,
+    "destination": "Seongnam",
+    "price": null,
+    "productId": 1000,
+    "qty": 1
+}
+
+root@siege:/# http GET http://store:8080/orderManagements/1
+HTTP/1.1 200 
+Content-Type: application/hal+json;charset=UTF-8
+Date: Fri, 04 Jun 2021 07:35:02 GMT
+Transfer-Encoding: chunked
+
+{
+    "_links": {
+        "orderManagement": {
+            "href": "http://store:8080/orderManagements/1"
+        },
+        "self": {
+            "href": "http://store:8080/orderManagements/1"
+        }
+    },
+    "customerId": 1,
+    "destination": "Seongnam",
+    "orderId": 1,
+    "productId": 1000,
+    "qty": null,
+    "status": "Created"
+}
+
+root@siege:/# http DELETE http://order:8080/orders/1
+HTTP/1.1 204 
+Date: Fri, 04 Jun 2021 07:35:31 GMT
+
+
+
+root@siege:/# http GET http://store:8080/orderManagements/1
+HTTP/1.1 200 
+Content-Type: application/hal+json;charset=UTF-8
+Date: Fri, 04 Jun 2021 07:35:34 GMT
+Transfer-Encoding: chunked
+
+{
+    "_links": {
+        "orderManagement": {
+            "href": "http://store:8080/orderManagements/1"
+        },
+        "self": {
+            "href": "http://store:8080/orderManagements/1"
+        }
+    },
+    "customerId": 1,
+    "destination": "Seongnam",
+    "orderId": 1,
+    "productId": 1000,
+    "qty": null,
+    "status": "OrderCanceled"
+}
+
+```
 
 # 운영
 
