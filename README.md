@@ -309,12 +309,12 @@ http GET http://store:8080/orderManagements/1
 
 ## 동기식 호출 과 Fallback 처리
 
-분석단계에서의 조건 중 하나로 예약->결제 간의 호출은 동기식 일관성을 유지하는 트랜잭션으로 처리하기로 하였다. 호출 프로토콜은 이미 앞서 Rest Repository 에 의해 노출되어있는 REST 서비스를 FeignClient 를 이용하여 호출하도록 한다. 
+분석단계에서의 조건 중 하나로 주문->결제 간의 호출은 동기식 일관성을 유지하는 트랜잭션으로 처리하기로 하였다. 호출 프로토콜은 이미 앞서 Rest Repository 에 의해 노출되어있는 REST 서비스를 FeignClient 를 이용하여 호출하도록 한다. 
 
 - 결제 서비스를 호출하기 위하여 Stub과 (FeignClient) 를 이용하여 Service 대행 인터페이스 (Proxy) 를 구현 
 
 ```
-@FeignClient(name="pay", url="${api.url.payment}")
+@FeignClient(name="payment", url="http://payment:8080")
 public interface PaymentService {
 
     @RequestMapping(method= RequestMethod.POST, path="/payments")
@@ -333,27 +333,24 @@ public class Booking {
 
     @PostPersist
     public void onPostPersist(){
-        // 예약시 결제까지 트랜잭션을 통합을 위해 결제 서비스 직접 호출
+
         {
-            mybnb.external.Payment payment = new mybnb.external.Payment();
-            payment.setBookId(getId());
-            payment.setRoomId(getRoomId());
-            payment.setGuest(getGuest());
+            ebookstore.external.Payment payment = new ebookstore.external.Payment();
+            payment.setOrderId(getId());
             payment.setPrice(getPrice());
-            payment.setName(getName());
-            payment.setHost(getHost());
-            payment.setAddress(getAddress());
-            payment.setUsedate(getUsedate());
             payment.setStatus("PayApproved");
 
-            // mappings goes here
             try {
-                BookingApplication.applicationContext.getBean(mybnb.external.PaymentService.class)
-                        .pay(payment);
+                OrderApplication.applicationContext.getBean(ebookstore.external.PaymentService.class)
+                    .pay(payment);
             }catch(Exception e) {
                 throw new RuntimeException("결제서비스 호출 실패입니다.");
             }
         }
+        
+        Ordered ordered = new Ordered();
+        BeanUtils.copyProperties(this, ordered);
+        ordered.publishAfterCommit();
     }
 
 }
@@ -378,20 +375,7 @@ http POST http://booking:8080/bookings roomId=1 name=호텔 price=1000 address=�
 http POST http://booking:8080/bookings roomId=2 name=펜션 price=1000 address=양평 host=Superman guest=홍길동 usedate=20201011 #Fail
 
 # 예약처리 시 에러 내용
-HTTP/1.1 500 Internal Server Error
-content-type: application/json;charset=UTF-8
-date: Wed, 05 Aug 2020 00:58:04 GMT
-server: envoy
-transfer-encoding: chunked
-x-envoy-upstream-service-time: 188
-
-{
-    "error": "Internal Server Error",
-    "message": "Could not commit JPA transaction; nested exception is javax.persistence.RollbackException: Error while committing the transaction",
-    "path": "/bookings",
-    "status": 500,
-    "timestamp": "2020-08-05T00:58:05.047+0000"
-}
+![image](https://user-images.githubusercontent.com/43338817/120755434-f265b100-c548-11eb-94d6-ba2d5e045a91.png)
 
 # 결제서비스 재기동전에 아래의 비동기식 호출 기능 점검 테스트 수행 (siege 에서)
 http DELETE http://booking:8080/bookings/1 #Success
