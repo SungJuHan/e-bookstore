@@ -359,24 +359,22 @@ public class Booking {
 - 동기식 호출에서는 호출 시간에 따른 타임 커플링이 발생하며, 결제 시스템이 장애가 나면 주문도 못받는다는 것을 확인:
 ```
 # 결제 서비스를 잠시 내려놓음 (ctrl+c)
-$ kubectl delete -f pay.yaml
+$ kubectl delete -f payment.yaml
+```
+![image](https://user-images.githubusercontent.com/43338817/120755770-61430a00-c549-11eb-8fee-e8ee9825e7bf.png)
 
-NAME                           READY   STATUS    RESTARTS   AGE
-pod/alarm-bc469c66b-nn7r9      2/2     Running   0          14m
-pod/booking-6f85b67876-rhwl2   2/2     Running   0          14m
-pod/gateway-7bd59945-g9hdq     2/2     Running   0          14m
-pod/html-78f648d5b-zhv2b       2/2     Running   0          14m
-pod/mypage-7587b7598b-l86jl    2/2     Running   0          14m
-pod/room-6c8cff5b96-78chb      2/2     Running   0          14m
-pod/siege                      2/2     Running   0          14m
-
+```
 # 예약처리 (siege 에서)
-http POST http://booking:8080/bookings roomId=1 name=호텔 price=1000 address=서울 host=Superman guest=배트맨 usedate=20201010 #Fail
-http POST http://booking:8080/bookings roomId=2 name=펜션 price=1000 address=양평 host=Superman guest=홍길동 usedate=20201011 #Fail
+http POST http://order:8080/orders customerId=1 productId=1000 qty=1 pricd=17000 destination=Seoul #Fail
 
+```
+
+```
 # 예약처리 시 에러 내용
-![image](https://user-images.githubusercontent.com/43338817/120755434-f265b100-c548-11eb-94d6-ba2d5e045a91.png)
+```
+![image](https://user-images.githubusercontent.com/43338817/120755545-12957000-c549-11eb-8e98-ee282f143d4b.png)
 
+```
 # 결제서비스 재기동전에 아래의 비동기식 호출 기능 점검 테스트 수행 (siege 에서)
 http DELETE http://booking:8080/bookings/1 #Success
 # 결과
