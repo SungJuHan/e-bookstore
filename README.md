@@ -284,30 +284,19 @@ public interface PaymentRepository extends PagingAndSortingRepository<Payment, L
 kubectl exec -it siege -n mybs -- /bin/bash
 ```
 
-- kiali 화면 접속
-http://a808fbb3bb7514eb7b08f595489d54e6-1558117695.ap-northeast-2.elb.amazonaws.com:20001/kiali/console
-![슬라이드1](https://user-images.githubusercontent.com/61722732/89362526-14b05780-d709-11ea-91c5-91bcb5c6e1b1.JPG)
-
-- (웹화면에서) 적용 후 REST API 테스트 
-http://a59f2304940914b7ca3875b12e62e321-738700923.ap-northeast-2.elb.amazonaws.com:8080/html/index.html
-
-* 숙소 등록
-![슬라이드2](https://user-images.githubusercontent.com/61722732/89362530-15e18480-d709-11ea-8deb-d15ca8bafa39.JPG)
-
-* 예약
-![슬라이드3](https://user-images.githubusercontent.com/61722732/89362531-167a1b00-d709-11ea-9587-ef56421befd3.JPG)
-
 - (siege 에서) 적용 후 REST API 테스트 
 ```
-# 숙소 서비스의 등록처리
-http POST http://room:8080/rooms name=호텔 price=1000 address=서울 host=Superman
-
-# 예약 서비스의 예약처리
-http POST http://booking:8080/bookings roomId=1 name=호텔 price=1000 address=서울 host=Superman guest=배트맨 usedate=20201010
-
-# 예약 상태 확인
-http http://booking:8080/bookings/1
+# 주문 서비스의 등록처리
+http POST http://order:8080/orders customerId=1 productId=1000 qty=1 pricd=17500 destination=Seoul
 ```
+![image](https://user-images.githubusercontent.com/43338817/120747988-fa1f5880-c53c-11eb-9090-51987ae5e01b.png)
+
+```
+# 상점 서비스의 주문관리 상태 확인
+http GET http://store:8080/orderManagements/1
+```
+![image](https://user-images.githubusercontent.com/43338817/120748017-03a8c080-c53d-11eb-9653-6afd27129c6e.png)
+
 - HTML 화면을 통해서 각 서비스 기능 수행
 
 ## 폴리글랏 퍼시스턴스
