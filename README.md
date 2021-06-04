@@ -132,7 +132,7 @@
 
 ```
 # eks cluster 생성
-eksctl create cluster --name user14-eks --version 1.17 --nodegroup-name standard-workers --node-type t3.medium --nodes 4 --nodes-min 1 --nodes-max 3
+eksctl create cluster --name user14-eks --version 1.17 --nodegroup-name standard-workers --node-type t3.medium --nodes 4 --nodes-min 1 --nodes-max 4
 
 # eks cluster 설정
 aws eks --region ap-southeast-2 update-kubeconfig --name user14-eks
@@ -149,112 +149,66 @@ kubectl apply -f install/kubernetes/istio-demo.yaml
 
 # kiali service type 변경
 kubectl edit service/kiali -n istio-system
-(ClusterIP -> LoadBalancer)
+(ClusterIP -> LoadBalancer) (vi 편집기를 이용하여 치환)
 
-# mybnb namespace 생성
-kubectl create namespace mybnb
+# mybs namespace 생성
+kubectl create namespace mybs
 
 # mybnb istio injection 설정
-kubectl label namespace mybnb istio-injection=enabled
+kubectl label namespace mybs istio-injection=enabled
 
 # mybnb image build & push
-cd mybnb/gateway
+cd mybs/gateway
 mvn package
-docker build -t 496278789073.dkr.ecr.ap-northeast-2.amazonaws.com/mybnb-gateway:latest .
-docker push 496278789073.dkr.ecr.ap-northeast-2.amazonaws.com/mybnb-gateway:latest
+docker build -t 879772956301.dkr.ecr.ap-southeast-2.amazonaws.com/user14-gateway:latest .
+docker push 879772956301.dkr.ecr.ap-southeast-2.amazonaws.com/user14-gateway:latest
 
-# mybnb deploy
-cd mybnb/yaml
+# mybs deploy
+cd mybs/yaml
 kubectl apply -f configmap.yaml
 kubectl apply -f gateway.yaml
-kubectl apply -f html.yaml
-kubectl apply -f room.yaml
-kubectl apply -f booking.yaml
-kubectl apply -f pay.yaml
+kubectl apply -f order.yaml
+kubectl apply -f delivery.yaml
+kubectl apply -f payment.yaml
+kubectl apply -f store.yaml
 kubectl apply -f mypage.yaml
 kubectl apply -f alarm.yaml
 kubectl apply -f siege.yaml
 
-# mybnb gateway service type 변경
-$ kubectl edit service/gateway -n mybnb
+# mybs gateway service type 변경
+$ kubectl edit service/gateway -n mybs
 (ClusterIP -> LoadBalancer)
 ```
 
 * 현황
 ```
 $ kubectl get ns
-NAME              STATUS   AGE
-default           Active   41h
-istio-system      Active   41h
-kafka             Active   41h
-kube-node-lease   Active   41h
-kube-public       Active   41h
-kube-system       Active   41h
-mybnb             Active   3m
-
-
-$ kubectl describe ns mybnb
-Name:         mybnb
-Labels:       istio-injection=enabled
-Annotations:  <none>
-Status:       Active
-
-No resource quota.
-
-No LimitRange resource.
-
-
-$ kubectl get all -n mybnb
-NAME                           READY   STATUS    RESTARTS   AGE
-pod/alarm-bc469c66b-nn7r9      2/2     Running   0          3m53s
-pod/booking-6f85b67876-rhwl2   2/2     Running   0          4m6s
-pod/gateway-7bd59945-g9hdq     2/2     Running   0          4m18s
-pod/html-78f648d5b-zhv2b       2/2     Running   0          4m14s
-pod/mypage-7587b7598b-l86jl    2/2     Running   0          3m57s
-pod/pay-755d679cbf-vmp2z       2/2     Running   0          4m
-pod/room-6c8cff5b96-78chb      2/2     Running   0          4m10s
-pod/siege                      2/2     Running   0          3m49s
-
-NAME              TYPE           CLUSTER-IP       EXTERNAL-IP                                                                   PORT(S)          AGE
-service/alarm     ClusterIP      10.100.36.234    <none>                                                                        8080/TCP         3m53s
-service/booking   ClusterIP      10.100.19.222    <none>                                                                        8080/TCP         4m6s
-service/gateway   LoadBalancer   10.100.195.171   a59f2304940914b7ca3875b12e62e321-738700923.ap-northeast-2.elb.amazonaws.com   8080:31754/TCP   4m18s
-service/html      ClusterIP      10.100.19.81     <none>                                                                        8080/TCP         4m14s
-service/mypage    ClusterIP      10.100.134.37    <none>                                                                        8080/TCP         3m57s
-service/pay       ClusterIP      10.100.210.94    <none>                                                                        8080/TCP         4m
-service/room      ClusterIP      10.100.78.233    <none>                                                                        8080/TCP         4m10s
-
-NAME                      READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/alarm     1/1     1            1           3m53s
-deployment.apps/booking   1/1     1            1           4m6s
-deployment.apps/gateway   1/1     1            1           4m18s
-deployment.apps/html      1/1     1            1           4m14s
-deployment.apps/mypage    1/1     1            1           3m57s
-deployment.apps/pay       1/1     1            1           4m
-deployment.apps/room      1/1     1            1           4m10s
-
-NAME                                 DESIRED   CURRENT   READY   AGE
-replicaset.apps/alarm-bc469c66b      1         1         1       3m53s
-replicaset.apps/booking-6f85b67876   1         1         1       4m6s
-replicaset.apps/gateway-7bd59945     1         1         1       4m18s
-replicaset.apps/html-78f648d5b       1         1         1       4m14s
-replicaset.apps/mypage-7587b7598b    1         1         1       3m57s
-replicaset.apps/pay-755d679cbf       1         1         1       4m
-replicaset.apps/room-6c8cff5b96      1         1         1       4m10s
 ```
+![image](https://user-images.githubusercontent.com/43338817/120736399-25974880-c527-11eb-9a07-68691726a9ef.png)
+
+```
+$ kubectl describe ns mybs
+```
+![image](https://user-images.githubusercontent.com/43338817/120736460-3e076300-c527-11eb-9337-0ff3b27ee564.png)
+
+```
+$ kubectl get all -n mybs
+```
+![image](https://user-images.githubusercontent.com/43338817/120736508-58414100-c527-11eb-92c7-7397b23f062e.png)
 
 ## DDD 의 적용
 
 * 각 서비스내에 도출된 핵심 Aggregate Root 객체를 Entity 로 선언하였다: (예시는 결제 마이크로서비스).
-  - 가능한 현업에서 사용하는 언어 (유비쿼터스 랭귀지)를 그대로 사용할 수 있지만, 일부 구현에 있어서 영문이 아닌 경우는 실행이 불가능한 경우가 있다 Maven pom.xml, Kafka의 topic id, FeignClient 의 서비스 id 등은 한글로 식별자를 사용하는 경우 오류가 발생하는 것을 확인하였다)
+  - 가능한 현업에서 사용하는 언어 (유비쿼터스 랭귀지)를 그대로 사용할 수 있다.
   - 최종적으로는 모두 영문을 사용하였으며, 이는 잠재적인 오류 발생 가능성을 차단하고 향후 확장되는 다양한 서비스들 간에 영향도를 최소화하기 위함이다.
 
 ```
-package mybnb;
+package ebookstore;
 
 import javax.persistence.*;
 import org.springframework.beans.BeanUtils;
 import java.util.List;
+import java.util.Date;
 
 @Entity
 @Table(name="Payment_table")
@@ -263,15 +217,24 @@ public class Payment {
     @Id
     @GeneratedValue(strategy=GenerationType.AUTO)
     private Long id;
-    private Long bookId;
-    private Long roomId;
-    private String name;
-    private Long price;
-    private String address;
-    private String host;
-    private String guest;
-    private String usedate;
+    private Long orderId;
+    private Integer price;
     private String status;
+
+    @PostPersist
+    public void onPostPersist(){
+        PaymentApproved paymentApproved = new PaymentApproved();
+        BeanUtils.copyProperties(this, paymentApproved);
+        paymentApproved.publishAfterCommit();
+    }
+
+    @PostUpdate
+    public void onPostUpdate(){
+        PaymentCanceled paymentCanceled = new PaymentCanceled();
+        BeanUtils.copyProperties(this, paymentCanceled);
+        paymentCanceled.publishAfterCommit();
+    }
+
 
     public Long getId() {
         return id;
@@ -280,71 +243,20 @@ public class Payment {
     public void setId(Long id) {
         this.id = id;
     }
-
-    public Long getBookId() {
-        return bookId;
+    public Long getOrderId() {
+        return orderId;
     }
 
-    public void setBookId(Long bookId) {
-        this.bookId = bookId;
+    public void setOrderId(Long orderId) {
+        this.orderId = orderId;
     }
-
-    public Long getRoomId() {
-        return roomId;
-    }
-
-    public void setRoomId(Long roomId) {
-        this.roomId = roomId;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public Long getPrice() {
+    public Integer getPrice() {
         return price;
     }
 
-    public void setPrice(Long price) {
+    public void setPrice(Integer price) {
         this.price = price;
     }
-
-    public String getAddress() {
-        return address;
-    }
-
-    public void setAddress(String address) {
-        this.address = address;
-    }
-
-    public String getHost() {
-        return host;
-    }
-
-    public void setHost(String host) {
-        this.host = host;
-    }
-
-    public String getGuest() {
-        return guest;
-    }
-
-    public void setGuest(String guest) {
-        this.guest = guest;
-    }
-
-    public String getUsedate() {
-        return usedate;
-    }
-
-    public void setUsedate(String usedate) {
-        this.usedate = usedate;
-    }
-
     public String getStatus() {
         return status;
     }
@@ -356,17 +268,20 @@ public class Payment {
 ```
 - Entity Pattern 과 Repository Pattern 을 적용하여 JPA 를 통하여 다양한 데이터소스 유형 (RDB or NoSQL) 에 대한 별도의 처리가 없도록 데이터 접근 어댑터를 자동 생성하기 위하여 Spring Data REST 의 RestRepository 를 적용하였다
 ```
-package mybnb;
+package ebookstore;
 
 import org.springframework.data.repository.PagingAndSortingRepository;
+import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 
+@RepositoryRestResource(collectionResourceRel="payments", path="payments")
 public interface PaymentRepository extends PagingAndSortingRepository<Payment, Long>{
+
 
 }
 ```
 - siege 접속
 ```
-kubectl exec -it siege -n mybnb -- /bin/bash
+kubectl exec -it siege -n mybs -- /bin/bash
 ```
 
 - kiali 화면 접속
